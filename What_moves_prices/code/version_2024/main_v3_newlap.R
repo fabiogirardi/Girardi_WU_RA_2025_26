@@ -1,9 +1,7 @@
 ######################################################################################################
 # LOAD PACKAGES & CLEAR WORKSPACE
 ######################################################################################################
-remotes::install_github("mlverse/chattr")
-Sys.setenv("OPENAI_API_KEY" = "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")
-#chattr_app()
+
 
 
 library('chattr')

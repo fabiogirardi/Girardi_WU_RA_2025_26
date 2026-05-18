@@ -651,7 +651,7 @@ fit_har_rv_monthly <- function(daily_rates, rate_col, forecast_horizon = 252) {
 
 har_1y <- fit_har_rv_monthly(swap_df, rate_col, forecast_horizon = 252)
 est_1y <- build_estimation_panel(moments_1y, har_1y, yield_pcs, forward_rates, 1)
-results_1y_IS  <- run_lambda(est_1y, "1y in-sample",                        "sigma2_hat_IS")
+results_1y_IS_1  <- run_lambda(est_1y, "1y in-sample",                        "sigma2_hat_IS")
 results_1y_OOS <- run_lambda(est_1y, "1y OOS",                              "sigma2_hat_OOS")
 
 build_table1 <- function() {
@@ -710,6 +710,8 @@ cat("Sample period:", format(min(results_1q_OOS$date)), "to",
 #   Predicted VRP = sigma*^2 - sigma_hat^2 (OOS)
 #   Quarterly: beta = 0.625*** (NW 13), R^2 = 0.235
 #   Annual:    beta = 0.653*** (NW 12), R^2 = 0.271
+
+load("rep_results.RData")
 
 # ---- Panel (A) ----
 relative_r2 <- function(panel) {
@@ -2877,10 +2879,10 @@ if (RUN_MULTI_TENOR) {
 }
 
 # Try to load cached forwards/moments at T_exp = 0.25 and 1
-USE_CACHE <- file.exists("multi_tenor_cache3.RData") ### ??? "multi_tenor_cache.RData"
+USE_CACHE <- file.exists("multi_tenor_cache3.RData") ### !!! "multi_tenor_cache.RData"
 if (USE_CACHE) {
   cat("\nLoading cached multi-tenor artifacts (T_exps 0.25 and 1)...\n")
-  load("multi_tenor_cache3.RData") ### ???
+  load("multi_tenor_cache3.RData") ### !!!
   cat("Cache contents:", paste(names(window_artifacts_cache), collapse = ", "), "\n")
 }
 
@@ -2891,11 +2893,10 @@ gsw_for_h <- gsw_panel %>%
 # For each tenor: assemble {forwards, moments at 0.25, 1, 5}.  Reuse cache
 # where possible; only compute T_exp = 5 (and any missing tenors) fresh.
 
-### !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! ###
-### !!!load moments and forwards chace around FOMC dates (additionally contains 5y maturity)!!! ###
-### !!!NO NEED TO RUN NEXT BLOCK!!! ###
-load("multi_tenor_cache2.RData")
 
+load("multi_tenor_cache2.RData")
+### !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! ###
+### !!!load moments and forwards cache around FOMC dates (additionally contains 5y maturity)!!! ###
 
 ### !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! ###
 ### !!!BEGINNING OF SKIP!!! ###
@@ -4645,7 +4646,6 @@ if (!is.null(res_q) && !is.null(res_y)) {
   cat(sprintf("%-20s %12.3f %12.3f\n", "R-squared", res_q$r2, res_y$r2))
   cat(sprintf("%-20s %12d %12d\n", "N", res_q$n, res_y$n))
 }
-
 
 
 # ===========================================================================

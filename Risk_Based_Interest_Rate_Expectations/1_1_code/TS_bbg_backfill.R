@@ -59,6 +59,10 @@ library(zoo)
 source("functions_appendix_H_v3.R")
 source("functions_appendix_I_v3.R")
 
+getwd()
+## set working directory to be able to load files
+setwd("~/GitHub/Girardi_WU_RA_2025_26/Risk_Based_Interest_Rate_Expectations/1_2_data")
+
 # ---- Load LSEG-based moments (2013-2023) ----
 load("rep_results.RData")
 results_1q_IS <- results_1q_IS %>% mutate(date = as.Date(date))

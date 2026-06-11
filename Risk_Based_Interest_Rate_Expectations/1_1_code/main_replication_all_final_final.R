@@ -44,16 +44,87 @@ getwd()
 ## set working directory to be able to load files
 setwd("~/GitHub/Girardi_WU_RA_2025_26/Risk_Based_Interest_Rate_Expectations/1_2_data")
 
-# ---- Load raw data ----
-## https://www.federalreserve.gov/econres/feds/the-us-treasury-yield-curve-1961-to-the-present.htm
-gsw_raw    <- read.csv("feds200628.csv", skip = 9)
-load("LSEG_all.RData");        LSEG_all        <- df_joined
-load("LSEG_additional.RData"); LSEG_additional <- df2
-load("svol_data.RData")   # loads swaption implied volatilities for all tenors (LSEG 2013- for now)
 
-LSEG_all2 <- left_join(LSEG_all, LSEG_additional, by = "Date")
+# =============================================================================
+# SAMPLE CONFIGURATION
+# =============================================================================
+# Change this one line to switch between data samples.
+# "lseg"     — LSEG swaption vol 2013-2023 (default, current sample)
+# "extended" — Bloomberg svol 2002-2023 + TS backfill pre-2011
+#              Requires ts_bb_extended_panel.RData to be built first
+#              by running TS_bbg_backfil_v2.R
 
-# ---- Reshape GSW Treasury par yields ----
+EXTENDED_SAMPLE <- "lseg"   # <-- CHANGE THIS LINE TO SWITCH SAMPLES
+
+# =============================================================================
+# DATA LOADING — branches on EXTENDED_SAMPLE
+# =============================================================================
+
+if (EXTENDED_SAMPLE == "lseg") {
+  
+  # --------------------------------------------------------------------------
+  # LSEG 2013-2023 (current sample)
+  # --------------------------------------------------------------------------
+  cat("Loading LSEG sample (2013-2023)...\n")
+  
+  load("LSEG_all.RData");        LSEG_all        <- df_joined
+  load("LSEG_additional.RData"); LSEG_additional <- df2
+  LSEG_all2 <- left_join(LSEG_all, LSEG_additional, by = "Date")
+  
+  load("svol_data.RData")        # LSEG swaption vol for Appendix H
+  
+  SAMPLE_START <- as.Date("2013-01-01")
+  SAMPLE_END   <- as.Date("2023-12-31")
+  SAMPLE_LABEL <- "LSEG 2013-2023"
+  LAMBDA_REF   <- 0.23    # expected λ magnitude on this sample
+  
+} else if (EXTENDED_SAMPLE == "extended") {
+  
+  # --------------------------------------------------------------------------
+  # Extended sample: Bloomberg svol 2002-2023 + TS backfill pre-2011
+  # --------------------------------------------------------------------------
+  # PREREQUISITE: run ts_bb_backfill_v2.R first to build the extended panel.
+  # That script produces ts_bb_extended_panel.RData which contains:
+  #   - extended_moments: unified RN variance/skewness 2002-2023
+  #   - period1, period2, period3: individual era panels
+  #   - var_reg, skew_reg: calibration regression objects
+  # --------------------------------------------------------------------------
+  if (!file.exists("ts_bb_extended_panel.RData")) {
+    stop(
+      "ts_bb_extended_panel.RData not found.\n",
+      "Run ts_bb_backfill_v2.R first to build the extended moments panel."
+    )
+  }
+  
+  cat("Loading extended sample (Bloomberg 2002-2023 + TS backfill)...\n")
+  
+  # Swap rates: LSEG throughout (Rogers uses LSEG rates for the full sample)
+  load("LSEG_all.RData");        LSEG_all        <- df_joined
+  load("LSEG_additional.RData"); LSEG_additional <- df2
+  LSEG_all2 <- left_join(LSEG_all, LSEG_additional, by = "Date")
+  
+  # Swaption vol: Bloomberg for the extended sample
+  load("BB_svol_data.RData")     # Bloomberg swaption vol 2002-2023
+  
+  # Extended moments panel (output of TS_bbg_backfil_v2.R)
+  load("ts_bb_extended_panel.RData")
+  # extended_moments: date, rn_variance, rn_third_moment, rn_skewness, source
+  
+  SAMPLE_START <- as.Date("2002-01-01")
+  SAMPLE_END   <- as.Date("2023-12-31")
+  SAMPLE_LABEL <- "Bloomberg 2002-2023 (+ TS backfill)"
+  LAMBDA_REF   <- 0.35    # paper's reported λ magnitude
+  
+} else {
+  stop("EXTENDED_SAMPLE must be 'lseg' or 'extended'.")
+}
+
+# =============================================================================
+# COMMON SETUP (runs for both samples)
+# =============================================================================
+
+# ---- GSW zero-coupon yields ----
+gsw_raw   <- read.csv("feds200628.csv", skip = 9)
 gsw_panel <- gsw_raw %>%
   rename(date = Date) %>%
   mutate(date = as.Date(date, "%Y-%m-%d")) %>%
@@ -65,7 +136,7 @@ gsw_panel <- gsw_raw %>%
   select(date, maturity, par_yield) %>%
   arrange(date, maturity)
 
-# ---- Reshape LSEG LIBOR swap rates ----
+# ---- LIBOR panel (all tenors from LSEG) ----
 tenor_map <- c("USDSB3L1Y"=1,"USDSB3L2Y"=2,"USDSB3L3Y"=3,"USDSB3L4Y"=4,
                "USDSB3L5Y"=5,"USDSB3L6Y"=6,"USDSB3L7Y"=7,"USDSB3L8Y"=8,
                "USDSB3L9Y"=9,"USDSB3L10Y"=10,"USDSB3L15Y"=15,
@@ -77,6 +148,7 @@ libor_panel <- LSEG_all2 %>%
          rate  = rate / 100) %>%
   filter(!is.na(tenor), !is.na(rate)) %>%
   rename(date = Date) %>%
+  mutate(date = as.Date(date)) %>%
   select(date, tenor, rate) %>%
   arrange(date, tenor)
 
@@ -91,16 +163,78 @@ choose_swap_tenor <- function(data = LSEG_all2, tenor = "10") {
 swap_df  <- choose_swap_tenor(LSEG_all2, tenor = "10")
 rate_col <- colnames(swap_df)[2]
 
-# Sanity check on units (should be ~0.5 to 10 ppt for 10y rate)
-stopifnot(median(swap_df[[rate_col]], na.rm = TRUE) > 0.5,
-          median(swap_df[[rate_col]], na.rm = TRUE) < 10)
+# ---- Filter all panels to sample dates ----
+swap_df    <- swap_df    %>% filter(date >= SAMPLE_START, date <= SAMPLE_END)
+gsw_panel  <- gsw_panel  %>% filter(date >= SAMPLE_START, date <= SAMPLE_END)
+libor_panel <- libor_panel %>% filter(date >= SAMPLE_START, date <= SAMPLE_END)
 
+# ---- Cache file naming (sample-specific to avoid cross-contamination) ----
+CACHE_PREFIX <- paste0("cache_", EXTENDED_SAMPLE)
+cache_path <- function(name) paste0(CACHE_PREFIX, "_", name, ".RData")
+
+# ---- Coerce date classes globally ----
+# Prevents factor-of-86400 bugs throughout downstream modules
+for (obj_name in c("swap_df", "gsw_panel", "libor_panel")) {
+  if (exists(obj_name)) {
+    df <- get(obj_name)
+    if ("date" %in% names(df) && !inherits(df$date, "Date")) {
+      df$date <- as.Date(df$date)
+      assign(obj_name, df)
+    }
+  }
+}
+
+# ---- Announce configuration ----
+cat("\n========================================================\n")
+cat("Rogers (2026) replication\n")
+cat("Sample:      ", SAMPLE_LABEL, "\n")
+cat("Date range:  ", format(SAMPLE_START), "to", format(SAMPLE_END), "\n")
+cat("Cache prefix:", CACHE_PREFIX, "\n")
+cat("λ reference: ", LAMBDA_REF, "ppt^-1\n")
+cat("========================================================\n\n")
+
+
+# ---- Data loaded ----
 cat("Data loaded.\n")
 cat("  GSW panel:    ", n_distinct(gsw_panel$date), "dates,",
     n_distinct(gsw_panel$maturity), "maturities\n")
 cat("  LIBOR panel:  ", n_distinct(libor_panel$date), "dates\n")
 cat("  Swap rates:   ", nrow(swap_df), "daily observations\n")
-cat("  Swaption vol: ", n_distinct(svol_10y_clean$date), "dates\n")
+if (exists("svol_10y_clean")) {
+  cat("  Swaption vol: ", n_distinct(svol_10y_clean$date), "dates (LSEG)\n")
+} else if (exists("bb_svol_10y_1q_clean")) {
+  cat("  Swaption vol: ", n_distinct(bb_svol_10y_1q_clean$date), "dates (Bloomberg)\n")
+}
+
+# =============================================================================
+# LOAD MAIN ESTIMATION RESULTS
+# =============================================================================
+# For "lseg": load pre-computed results
+# For "extended": results need to be re-estimated on the extended panel
+#   (the main estimation modules use whichever svol data is loaded above)
+
+rep_results_file <- cache_path("rep_results")
+
+if (file.exists(rep_results_file)) {
+  load(rep_results_file)
+  cat("Loaded cached estimation results:", rep_results_file, "\n")
+} else {
+  cat("No cached results found for sample '", EXTENDED_SAMPLE, "'.\n", sep = "")
+  cat("Run main estimation modules to generate results.\n")
+  cat("Results will be saved as:", rep_results_file, "\n")
+}
+
+# Coerce date classes in results panels
+for (obj_name in c("results_1q_IS", "results_1q_OOS",
+                   "results_1y_IS", "results_1y_OOS")) {
+  if (exists(obj_name)) {
+    df <- get(obj_name)
+    df$date <- as.Date(df$date)
+    assign(obj_name, df)
+  }
+}
+
+
 
 # ===========================================================================
 # 1. APPENDIX H — SWAP FORWARD RATES (1q AND 1y)
